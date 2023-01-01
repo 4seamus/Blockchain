@@ -4,41 +4,38 @@ import blockchain.client.BlockchainClient;
 import blockchain.client.Miner;
 import blockchain.core.Blockchain;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-//TODO eventually
-// - Verify 'no transaction lost' guarantee
-// - Revise client inheritance (now that it is known what Stage 6 tests expect)
-// - Add proper comments + javadoc
+//TODO list - future, whenever
+// - Convert tests to JUnit5 and improve coverage
+// - Add logging
 
 public class Main {
     private static final Blockchain blockchain = Blockchain.getInstance();
-    private static final int MAX_WAIT_BETWEEN_TRANSACTIONS_MILLIS = 100;
+    private static final int MAX_WAIT_BETWEEN_TRANSACTIONS_MILLIS = 50;
+    private static final int NUM_OF_TRANSACTIONS_TO_GENERATE = 25;
     public static void main(String[] args) throws InterruptedException {
-        int threads = Runtime.getRuntime().availableProcessors() - 3;
+        int threads = Runtime.getRuntime().availableProcessors() - 1;
         ExecutorService executorService = Executors.newFixedThreadPool(threads);
         Random rng = new Random();
 
-        int i = 1;
+        final Deque<String> transactions = generateTransactions();
+
+        int minerId = 1;
         while (!transactions.isEmpty()) {
             BlockchainClient client;
-            String[] transactionData = transactions.pop().split(",");
 
-            String sender = transactionData[0].strip();
-            String recipient = transactionData[1].strip();
-            long amount = Long.valueOf(transactionData[2].strip());
-
-            if (rng.nextDouble() <= 0.3 ? true : false) { // create miner with negative bias
-                client = new Miner("miner" + i);
-                executorService.submit(client);
-                i++;
+            if (rng.nextDouble() <= 0.4) { // create miner with negative bias
+                client = new Miner("miner" + minerId);
+                minerId++;
             } else {
+                String[] transactionData = transactions.pop().split(", ");
+                String sender = transactionData[0];
+                String recipient = transactionData[1];
+                long amount = Long.parseLong(transactionData[2]);
                 client = new BlockchainClient(sender, recipient, amount);
             }
 
@@ -46,49 +43,26 @@ public class Main {
             Thread.sleep(rng.nextInt(MAX_WAIT_BETWEEN_TRANSACTIONS_MILLIS));  // send messages with random periodicity
         }
 
-        // the blockchain may still have unprocessed transactions:
-        // those added at runtime as mining award
+        // the blockchain may still have unprocessed transactions which were added at runtime, as mining award
         while (blockchain.hasUnprocessedTransactions()) {
-            Miner miner = new Miner("miner" + i);
+            Miner miner = new Miner("miner" + minerId);
             executorService.submit(miner);
-            i++;
+            minerId++;
             Thread.sleep(rng.nextInt(MAX_WAIT_BETWEEN_TRANSACTIONS_MILLIS));  // send messages with random periodicity
         }
 
         executorService.shutdown();
         executorService.awaitTermination(10, TimeUnit.SECONDS); // waits for threads to terminate
     }
-    private static final List<String> TRANSACTIONS_LIST = List.of(
-        "Beci, Joci, 10",
-        "Keke, Kata, 25",
-        "Kata, Keke, 5",
-        "Laci, Mici, 250",
-        "miner1, Pepe, 70",
-        "Boci, Juci, 30",
-        "Frici, Alfonz, 12",
-        "Alfonz, Gizi, 112",
-        "Kalman, Bozse, 2",
-        "Jani, Juli, 53",
-        "Juli, Pista, 21",
-        "Juci, Juli, 27",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 2",
-        "Boci, Mici, 3",
-        "Pista, Juli, 550",
-        "Pista, Juli, 550",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1",
-        "Mici, Boci, 1"
-    );
 
-    private static final Deque<String> transactions = new ArrayDeque<>(TRANSACTIONS_LIST);
+    static Deque<String> generateTransactions() {
+        Random rng = new Random();
+        List<String> senders = new ArrayList<>(List.of("Juli", "Joci", "Boci", "Mici", "Frici", "Laci", "Alfonz"));
+        Deque<String> transactions = new ArrayDeque<>();
+        for (int i = 0; i < NUM_OF_TRANSACTIONS_TO_GENERATE; i++) {
+            Collections.shuffle(senders);
+            transactions.add(String.format("%s, %s, %d", senders.get(0), senders.get(1), rng.nextInt(200)));
+        }
+        return transactions;
+    }
 }

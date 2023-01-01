@@ -1,4 +1,5 @@
 package blockchain.utils;
+import java.nio.charset.StandardCharsets;
 import java.security.*;
 
 import java.security.spec.InvalidKeySpecException;
@@ -11,7 +12,7 @@ public class CryptUtil {
     public static String applySha256(String input){
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(input.getBytes("UTF-8"));
+            byte[] hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
             StringBuilder hexString = new StringBuilder();
             for (byte elem: hash) {
                 String hex = Integer.toHexString(0xff & elem);
@@ -26,28 +27,28 @@ public class CryptUtil {
         }
     }
 
-    // signs data using the private key that is stored in keyFile path
+    // signs data using the private key
     // Credits:
     //   https://mkyong.com/java/java-digital-signatures-example/
     //   https://stackoverflow.com/questions/5355466/converting-secret-key-into-a-string-and-vice-versa
-    public static byte[] sign(String data, String privateKey) throws Exception {
+    public static String sign(String data, String privateKey) throws Exception {
         Signature rsa = Signature.getInstance("SHA1withRSA");
         PrivateKey privateKeyDecoded = decodeBase64PrivateKey(privateKey);
 
         rsa.initSign(privateKeyDecoded);
         rsa.update(data.getBytes());
 
-        return rsa.sign();
+        return Base64.getEncoder().encodeToString(rsa.sign());
     }
 
-    public static boolean verifySignature(String data, byte[] signature, String publicKey) throws Exception {
+    public static boolean verifySignature(String data, String base64Signature, String publicKey) throws Exception {
         Signature sig = Signature.getInstance("SHA1withRSA");
-        PublicKey publicKeyDecoded;
-        publicKeyDecoded = decodeBase64PublicKey(publicKey);
+        PublicKey publicKeyDecoded = decodeBase64PublicKey(publicKey);
 
         sig.initVerify(publicKeyDecoded);
         sig.update(data.getBytes());
 
+        byte[] signature = Base64.getDecoder().decode(base64Signature);
         return sig.verify(signature);
     }
 

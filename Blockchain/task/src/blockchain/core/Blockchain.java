@@ -1,64 +1,70 @@
 package blockchain.core;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
-//TODO eventually: refactor with LinkedList to make this class simpler & cleaner.
-// The minimalistic, self-implemented LL resulted in more complex code in methods.
-public class Blockchain {
+public class Blockchain { // Singleton pattern
     private static final long STARTING_BALANCE = 100; // as per spec
-    private static final int MAX_CHAIN_LENGTH = 15; // as per spec
+    private static int MAX_CHAIN_LENGTH = 15; // as per spec
     private static final Blockchain INSTANCE = new Blockchain();
-    private static long transactionSequence = 1;
-    private long length;
-    private Block tail;
-    private Block head;
-    private int prefixZeroCount;
-    private final List<Transaction> transactions;
+    private static final Deque<Block> blockchain = new ConcurrentLinkedDeque<>();
+    private static long transactionSequence;
+    private int difficulty;
+    private final Deque<Transaction> transactions;
 
-    public synchronized static Blockchain getInstance() {
+    public static Blockchain getInstance() {
         return INSTANCE;
     }
 
-    public synchronized long getLength() {
-        return length;
+    public synchronized int size() {
+        return blockchain.size();
+    }
+
+    public synchronized Block getTail() {
+        return blockchain.peekLast();
     }
 
     public synchronized Block getHead() {
-        return head;
+        return blockchain.peekFirst();
     }
 
-    public int getPrefixZeroCount() {
-        return prefixZeroCount;
+    public synchronized int getDifficulty() {
+        return difficulty;
     }
 
-    public void setPrefixZeroCount(int prefixZeroCount) {
-        this.prefixZeroCount = prefixZeroCount;
+    public synchronized void setDifficulty(int difficulty) {
+        this.difficulty = difficulty;
+    }
+
+    public static void setMaxChainLength(int chainLength) {
+        MAX_CHAIN_LENGTH = chainLength;
     }
 
     private Blockchain() {
-        this.prefixZeroCount = 0;
-        length = 0;
-        tail = null;
-        head = null;
-        transactions = new ArrayList<>();
+        this.difficulty = 0;
+        transactions = new ConcurrentLinkedDeque<>();
+        transactionSequence = 1;
     }
 
-    private synchronized boolean isBlockAcceptable(Block b) {
+    private boolean isBlockAcceptable(Block b) {
+        String expectedHashOfPrevBlock = hashOfLastBlock();
         try {
-            if (!b.isValid()) {
-                throw new RuntimeException("## ERROR ## Reject: this block is invalid.");
-            }
-
-            if (head != null && b.getId() == head.getId()) {
-                // Blockchain (vs client) actively prevents lost transactions due to block reject:
-                // Puts back otherwise lost rejected transactions to queue for future miners to process.
+            if (!b.isValid(expectedHashOfPrevBlock)) {
+                // Actively prevents lost transactions due to block reject:
+                // Put back transactions in rejected blocks to queue for future miners to process
                 transactions.addAll(b.transactions);
-                // throw new RuntimeException("## DIAG ## Reject: duplicate block id");
-                return false; // reject silently, tests don't tolerate diag print
+                // throw new RuntimeException("## DIAG ## Reject: this block is invalid.");
+                return false;
             }
 
-            if (b.id > 1 && !(head.timeStamp < b.timeStamp)) {
-                throw new RuntimeException("## ERROR ## Reject: this block's timestamp is out of sequence.");
+            if (this.size() > 0 && b.getId() == blockchain.peekLast().getId()) {
+                transactions.addAll(b.transactions);
+                throw new RuntimeException("## DIAG ## Reject: duplicate block id");
+            }
+
+            if (b.id > 1 && !(getTail().timeStamp < b.timeStamp)) {
+                transactions.addAll(b.transactions);
+                throw new RuntimeException("## DIAG ## Reject: this block's timestamp is out of sequence.");
             }
 
         } catch (RuntimeException e) {
@@ -73,54 +79,39 @@ public class Blockchain {
     }
 
     public synchronized boolean acceptBlock(Block b) {
-        if (length >= MAX_CHAIN_LENGTH) { // comply with test expectations
+        if (blockchain.size() >= MAX_CHAIN_LENGTH) { // comply with spec
             Runtime.getRuntime().halt(0);
         }
 
-        if (!isBlockAcceptable(b)) { return false; }
+        if (!isBlockAcceptable(b)) return false;
 
-        // 1st block case
-        if (length == 0) {
-            tail = b;
-        // Nth block case
-        } else {
-            head.next = b;
-        }
-        head = b;
-        length++;
+        // block is proven acceptable, add it
+        blockchain.add(b);
 
         printBlockStats(b);
-        adjustComplexity(b); // keep block creation in 10-60s
+        adjustComplexity(b); // keep block creation within 10-60 (virtual) second interval
 
-        // validate whole chain after block added
-
-        if (!isValid()) {
-            throw new RuntimeException("## ERROR ## Incorrect block accepted, terminating.");
-            // Runtime.getRuntime().halt(0);
-            // return false;
+        // validate whole blockchain after block accepted
+        if (!isChainValid()) {
+            System.out.println("## FATAL ## Incorrect block accepted, terminating.");
+            Runtime.getRuntime().halt(0);
         }
 
         return true;
     }
 
-    public synchronized boolean isValid() {
-        Block b = tail;
-        if (tail == null) return true; // empty blockchain is valid
+    public synchronized boolean isChainValid() {
+        if (this.size() == 0) return true; // empty blockchain is valid
 
-        while (b.next != null) {
-            if (!b.isValid()) return false;
-            if (b.id + 1 != b.next.getId()) return false; // ensure block ids are ordered
-            b = b.next;
+        long validBlockId = this.getHead().id;
+        String expectedHashOfPrevBlock = "0"; // first block expects 0 as previous hash, by convention
+        for (Block b : blockchain) {
+            if (!b.isValid(expectedHashOfPrevBlock)) return false;
+            expectedHashOfPrevBlock = b.hashOfBlock();
+            if (b.id != validBlockId) return false; // enforce ascending block id order
+            validBlockId++;
         }
-
-        if (!b.isValid()) return false; // validate the last block
-        if (b.id + 1 != b.next.getId()) return false;
-
         return true;
-    }
-
-    public synchronized long nextBlockId() {
-        return getLength() == 0 ? 1: head.getId() + 1;
     }
 
     public synchronized long nextTransactionId() {
@@ -128,18 +119,18 @@ public class Blockchain {
     }
 
     public synchronized String hashOfLastBlock() {
-        return getLength() == 0 ? "0" : head.hashOfBlock();
+        return size() == 0 ? "0" : getTail().hashOfBlock();
     }
 
     // set compute complexity to keep block creation rate in a desired range
-    private void adjustComplexity(Block b) { // current implementation prints
+    private synchronized void adjustComplexity(Block b) { // current implementation prints
         if (durationOfCreateBlock(b) < 10) {
-            setPrefixZeroCount(getPrefixZeroCount() + 1);
-            System.out.println("N was increased to " + prefixZeroCount);
+            setDifficulty(getDifficulty() + 1);
+            System.out.println("N was increased to " + difficulty);
             System.out.println();
         }
-        else if (durationOfCreateBlock(b) > 60 && prefixZeroCount > 0) {
-            setPrefixZeroCount(getPrefixZeroCount() - 1);
+        else if (durationOfCreateBlock(b) > 60 && difficulty > 0) {
+            setDifficulty(getDifficulty() - 1);
                 System.out.println("N was decreased by 1");
             System.out.println();
         } else {
@@ -148,10 +139,10 @@ public class Blockchain {
         }
     }
 
-    // time it took to create the block in seconds
+    // time it took to create the block in virtual seconds
     private long durationOfCreateBlock(Block b) {
         // return (new Date().getTime() - b.getTimeStamp()) / 1000;
-        // tests don't allow logic to work as per spec
+        // Hyperskill tests don't allow logic to work as per spec
         // workaround: pretend that 5 millisecond = 1 second
         return (new Date().getTime() - b.getTimeStamp()) / 5;
     }
@@ -161,48 +152,18 @@ public class Blockchain {
         System.out.printf("Block was generating for %d seconds\n", durationOfCreateBlock(b));
     }
 
-    public long accountBalanceOfClient(String client) {
-        Block b = tail;
+    public synchronized long accountBalanceOfClient(String client) {
         long sum = STARTING_BALANCE;
-
-        // process chain until last block
-        while (b.next != null) {
+        for (Block b : blockchain) {
             for (Transaction t : b.transactions) {
-                if (t.recipient().equals(client)) {
+                if (t.recipient().equals(client) && !t.sender().equals(client)) {
                     sum += t.amount();
-                }
-                // no else if to properly implement send-to-self edge case transaction
-                if (t.sender().equals(client)) {
+                } else if (t.sender().equals(client) && !t.recipient().equals(client)) {
                     sum -= t.amount();
                 }
             }
-            b = b.next;
         }
-
-        // process last block
-        for (Transaction t : b.transactions) {
-            if (t.recipient().equals(client)) {
-                sum += t.amount();
-            }
-            // no else if to properly implement send-to-self edge case transaction
-            if (t.sender().equals(client)) {
-                sum -= t.amount();
-            }
-        }
-
         return sum;
-    }
-
-    @Override
-    public String toString() {
-        StringBuilder sb = new StringBuilder();
-        Block b = tail;
-        while (b.next != null) {
-            sb.append(b).append("\n");
-            b = b.next;
-        }
-        sb.append(b).append("\n"); // append the last block
-        return sb.toString();
     }
 
     // invoked by transaction-initiating BlockchainClient
@@ -218,9 +179,6 @@ public class Blockchain {
     }
 
     public synchronized boolean hasUnprocessedTransactions() {
-        if (!transactions.isEmpty()) {
-            return true;
-        }
-        return false;
+        return !transactions.isEmpty();
     }
 }

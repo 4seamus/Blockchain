@@ -8,8 +8,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Random;
 
-import static blockchain.utils.CryptUtil.sign;
-
 public class Miner extends BlockchainClient implements Runnable {
 
     public Miner(String name) {
@@ -23,27 +21,24 @@ public class Miner extends BlockchainClient implements Runnable {
         Block b;
 
         List<Transaction> transactions = new ArrayList<>();
-        if (blockchain.getLength() > 1) {
-            transactions = blockchain.pullTransactions();
-        }
+        if (blockchain.size() > 1) transactions = blockchain.pullTransactions(); // 1st block will not have transactions, as per spec
 
         do {
             int magic_number = rng.nextInt();
-            Block head = blockchain.getHead();
             String hashOfPrevBlock = blockchain.hashOfLastBlock();
-            long id = blockchain.nextBlockId();
+            int blockId = blockchain.size() + 1;
 
-            if (id > 1) {
-                // timestamp correction if a parallel miner has found a block in the meantime
-                // tests don't allow out of order timestamps
-                timeStamp = Math.max(timeStamp, head.getTimeStamp() + 1);
+            if (blockId > 1) {
+                // tests don't allow out of order time stamps
+                // time stamp correction if a parallel miner has found a block in the meantime
+                timeStamp = Math.max(timeStamp, blockchain.getTail().getTimeStamp() + 1);
             }
 
-            b = new Block(id, magic_number, timeStamp, hashOfPrevBlock, null, transactions, name);
-        } while (!b.hashOfBlock().startsWith("0".repeat(blockchain.getPrefixZeroCount())));
+            b = new Block(blockId, magic_number, timeStamp, hashOfPrevBlock, transactions, this.name);
+        } while (!b.hashOfBlock().startsWith("0".repeat(blockchain.getDifficulty())));
 
         if (blockchain.acceptBlock(b)) { // award 100 coins to miner if mined block is accepted by the blockchain
-            send("**BLOCKCHAIN**", name, 100);
+            send("**BLOCKCHAIN**", this.name, 100);
         }
     }
 

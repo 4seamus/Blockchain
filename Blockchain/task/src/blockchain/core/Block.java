@@ -5,54 +5,37 @@ import static blockchain.utils.CryptUtil.*;
 import java.util.List;
 
 public class Block {
-    long id;
+    private static final Blockchain blockchain = Blockchain.getInstance();
+    int id;
     long magic_number;
     long timeStamp;
     String hashOfPrevBlock;
-    Block next;
     String minerName;
     List<Transaction> transactions;
 
-    public Block(long id, long magic_number, long timeStamp, String hashOfPrevBlock, Block next, List<Transaction> transactions, String minerName) {
+    public Block(int id, long magic_number, long timeStamp, String hashOfPrevBlock, List<Transaction> transactions, String minerName) {
         this.id = id;
         this.magic_number = magic_number;
         this.timeStamp = timeStamp;
         this.hashOfPrevBlock = hashOfPrevBlock;
-        this.next = next;
-        this.minerName = minerName;
         this.transactions = transactions;
+        this.minerName = minerName;
     }
 
-    public boolean isValid() {
+    public boolean isValid(String expectedHashOfPrevBlock) {
         long prevTransactionId = 0;
-        for (Transaction p : transactions) {
-            if (!isTransactionSignatureValid(p)) // tamper-validate: RSA signature
+        for (Transaction t : transactions) {
+            if (!t.isSignatureValid()) { // tamper-validate: RSA signature
                 return false;
-
-            if (p.id() <= prevTransactionId) // tamper-validate: order of transaction content
-                return false;
-        }
-
-        if (next == null) return true; // last block: skip hash validation
-
-        return hashOfBlock().equals(next.hashOfPrevBlock); // validate hash
-    }
-
-    private boolean isTransactionSignatureValid(Transaction t) {
-        // String TEST_PUBLIC_KEY = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCv6VQZqNbT/4W+tu/dw6L/EjZc1uRMihS1gcrwkVt7xHTmnmS039OgqLkV/o3EbEIUiUc1/z99KnVSaWZr53Ts9VOG8eNWA18GEXNr7IaO7cdUn8pMs2ILJ8rSeYa39U4w4fm+M/W0jQ00lGGtvJ/frbKPEg8mBSviFHv+o4igqwIDAQAB";
-
-        String transactionContent = t.sender() + t.recipient() + t.amount();
-        try {
-            // if (!verifySignature(transactionContent, t.signature(), TEST_PUBLIC_KEY)) { // TEST: call with hard-coded TEST_PUBLIC_KEY to trigger failures
-            if (!verifySignature(transactionContent, t.signature(), t.publicKey())) {
-                throw new RuntimeException("## ERROR ## Invalid RSA signature.");
             }
-        } catch (Exception e) {
-            System.out.println("## ERROR ## RSA signature verification failed.\n" + e.getMessage());
-            return false;
+
+            if (t.id() <= prevTransactionId) { // tamper-validate: order of transaction content
+                return false;
+            }
         }
 
-        return true;
+        if (blockchain.size() == 0) return true; // first block, skip hash validation
+        return hashOfPrevBlock.equals(expectedHashOfPrevBlock);
     }
 
     public String hashOfBlock() {
@@ -99,7 +82,7 @@ public class Block {
         return blockAsString.toString();
     }
 
-    public long getId() {
+    public int getId() {
         return id;
     }
 

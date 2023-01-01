@@ -11,16 +11,15 @@ import static blockchain.utils.CryptUtil.sign;
 
 public class BlockchainClient implements Runnable{
     protected String name;
-    protected String recipient;
+    protected String transferRecipient;
     protected long amount;
     protected final Blockchain blockchain;
     protected RSAKeyPair rsaKeyPair;
-    protected int coins;
 
-    public BlockchainClient(String name, String recipient, long amount) {
-        blockchain = Blockchain.getInstance();
+    public BlockchainClient(String name, String transferRecipient, long amount) {
+        this.blockchain = Blockchain.getInstance();
         this.name = name;
-        this.recipient = recipient;
+        this.transferRecipient = transferRecipient;
         this.amount = amount;
 
         try {
@@ -31,20 +30,24 @@ public class BlockchainClient implements Runnable{
         }
     }
 
-    public void send() {
-        send(name, recipient, amount);
+    public BlockchainClient(String name) {
+        this.blockchain = Blockchain.getInstance();
+        this.name = name;
     }
 
-    public void send(String sender, String recipient, long amount) {
-        Transaction t;
-        String transactionContent = sender + recipient + amount;
+    public void send() {
+        send(name, transferRecipient, amount);
+    }
 
-        if (amount > getBalance()) return; // when a client tries to send more than they have, send becomes NOP
+    public boolean send(String transferSender, String transferRecipient, long amount) {
+        Transaction t;
+        String transactionContent = transferSender + transferRecipient + amount;
+
+        if (amount > getBalance()) return false; // when a client tries to send more than they have, send becomes NOP
 
         try {
             t = new Transaction(blockchain.nextTransactionId(),
-                    //name, recipient, amount,
-                    sender, recipient, amount,
+                    transferSender, transferRecipient, amount,
                     sign(transactionContent, rsaKeyPair.PrivateKey()),
                     rsaKeyPair.PublicKey());
         } catch (Exception e) {
@@ -52,6 +55,7 @@ public class BlockchainClient implements Runnable{
             throw new RuntimeException(e);
         }
         blockchain.receiveTransactions(t);
+        return true;
     }
 
     public long getBalance() {
